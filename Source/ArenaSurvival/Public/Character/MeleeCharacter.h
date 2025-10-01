@@ -1,17 +1,57 @@
-// Fill out your copyright notice in the Description page of Project Settings.
-
 #pragma once
-
-#include "CoreMinimal.h"
 #include "Character/ArenaCharacterBase.h"
-#include "MeleeCharacter.generated.h"
+#include "CoreMinimal.h"
+#include "ArenaMeleeCharacter.generated.h"
+
+class UGameplayAbility;
 
 /**
- * 
+ * Melee-only character: auto-attack ability + melee hit trace + notify hooks
  */
 UCLASS()
-class ARENASURVIVAL_API AMeleeCharacter : public AArenaCharacterBase
+class ARENASURVIVAL_API AArenaMeleeCharacter : public AArenaCharacterBase
 {
-	GENERATED_BODY()
-	
+    GENERATED_BODY()
+
+public:
+    AArenaMeleeCharacter();
+
+protected:
+    virtual void GiveStartupAbilities() override;
+
+public:
+    // Auto-montage ability class (BP: GA_AutoAttack)
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Melee|Ability")
+    TSubclassOf<UGameplayAbility> MeleeAutoAbilityClass;
+
+
+    // Montage side is handled by the ability. Hit timing via notifies:
+    UFUNCTION(BlueprintCallable, Category = "Melee")
+    void Anim_BeginMeleeWindow();
+
+    UFUNCTION(BlueprintCallable, Category = "Melee")
+    void Anim_EndMeleeWindow();
+
+    UFUNCTION(BlueprintCallable, Category = "Melee")
+    void Anim_MeleeHitTrace();
+
+    // Simple melee sweep config
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = "50"))
+    float MeleeRange = 220.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Melee", meta = (ClampMin = "10"))
+    float MeleeRadius = 45.f;
+
+    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Melee")
+    FName MeleeSocket = TEXT("hand_r");
+
+protected:
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee")
+    bool bMeleeWindowActive = false;
+
+    virtual void GiveStartupAbilities() override;
+
+private:
+    // prevent multiple hits on same target within one swing
+    TSet<TWeakObjectPtr<AActor>> MeleeHitThisSwing;
 };

@@ -1,99 +1,60 @@
 #pragma once
-
 #include "CoreMinimal.h"
 #include "GameFramework/Character.h"
-#include "AbilitySystemInterface.h"   // ADD
+#include "AbilitySystemInterface.h"
 #include "ArenaCharacterBase.generated.h"
 
-class USpringArmComponent;
-class UCameraComponent;
-class UInputMappingContext;
-class UInputAction;
+class USpringArmComponent; class UCameraComponent;
+class UInputMappingContext; class UInputAction;
 struct FInputActionValue;
-class UAbilitySystemComponent;
-class UGameplayAbility;
-class AActor;
+class UAbilitySystemComponent; class UCharacterStatsComponent;
 
-UENUM(BlueprintType)
-enum class ECombatStyle : uint8
-{
-    Melee  UMETA(DisplayName = "Melee"),
-    Ranged UMETA(DisplayName = "Ranged")
-};
-
-UCLASS()
+UCLASS(HideCategories = ("Tick"))
 class ARENASURVIVAL_API AArenaCharacterBase
-    : public ACharacter
-    , public IAbilitySystemInterface   // ADD
+    : public ACharacter, public IAbilitySystemInterface
 {
     GENERATED_BODY()
-
 public:
     AArenaCharacterBase();
 
-    // IAbilitySystemInterface
     virtual UAbilitySystemComponent* GetAbilitySystemComponent() const override { return ASC; }
 
-    // ACharacter
+    // lifecycle
     virtual void BeginPlay() override;
-    virtual void Tick(float DeltaTime) override;
+    virtual void Tick(float DeltaSeconds) override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-
-    FORCEINLINE USpringArmComponent* GetCameraBoom() const { return CameraBoom; }
-    FORCEINLINE UCameraComponent* GetFollowCamera() const { return FollowCamera; }
-
-    // Combat
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat")
-    ECombatStyle CombatStyle = ECombatStyle::Melee;
-
-    // Ranged
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Ranged")
-    TSubclassOf<AActor> ProjectileClass;
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Ranged")
-    FName MuzzleSocketName = TEXT("Muzzle");
-
-    UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Combat|Ranged")
-    float ProjectileSpawnForwardOffset = 30.f;
-
-    // GAS
-    UPROPERTY(EditAnywhere, Category = "GAS")
-    TSubclassOf<UGameplayAbility> MeleeAutoAbilityClass;
-
-    // Anim hooks
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void Anim_FireProjectile();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void Anim_BeginMeleeWindow();
-
-    UFUNCTION(BlueprintCallable, Category = "Combat")
-    void Anim_EndMeleeWindow();
-
-
+    virtual void PossessedBy(AController* NewController) override;       // NEW
+    virtual void OnRep_PlayerState() override;                           // NEW
 
 protected:
     void Move(const FInputActionValue& Value);
 
-    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Combat|Melee")
-    bool bMeleeWindowActive = false;
+    // türevlerin baþlangýçta vereceði ability’ler
+    virtual void GiveStartupAbilities() {}
 
-private:
-    // Camera
+    // ASC’yi güvenli init eder (BeginPlay/PossessedBy/OnRep_PlayerState)
+    void InitASC();                                                      // NEW
+
+    // Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
     USpringArmComponent* CameraBoom;
 
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
     UCameraComponent* FollowCamera;
 
-    // Input
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
     UInputMappingContext* DefaultMappingContext;
 
     UPROPERTY(EditAnywhere, BlueprintReadOnly, Category = "Input", meta = (AllowPrivateAccess = "true"))
     UInputAction* MoveAction;
 
-    // ASC instance
-    UPROPERTY(VisibleAnywhere, Category = "GAS")
-    UAbilitySystemComponent* ASC = nullptr;   // keep pointer; create in ctor
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "GAS")
+    UAbilitySystemComponent* ASC;
+
+    UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Stats")
+    UCharacterStatsComponent* Stats;
+
+private:
+    bool bASCInitialized = false;                // tekrar init’i engeller
+    bool bStartupGiven = false;                 // ability’ler bir kez verilsin
 };

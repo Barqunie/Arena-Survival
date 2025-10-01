@@ -1,115 +1,97 @@
 #include "Character/ArenaCharacterBase.h"
 #include "Camera/CameraComponent.h"
-#include "Components/CapsuleComponent.h"
-#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/SpringArmComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "GameFramework/PlayerController.h"
-#include "Engine/LocalPlayer.h"                 // ADD
-#include "AbilitySystemComponent.h"
-#include "GameplayAbilitySpec.h"
-// #include "NativeGameplayTags.h"              // optional
-#include "Abilities/GameplayAbility.h"
-
+#include "Engine/LocalPlayer.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
+#include "AbilitySystemComponent.h"
 #include "Components/Character/CharacterStatsComponent.h"
 
 AArenaCharacterBase::AArenaCharacterBase()
 {
-    PrimaryActorTick.bCanEverTick = false;      // no tick panel
+    PrimaryActorTick.bCanEverTick = false;
 
-    // movement
-    bUseControllerRotationYaw = false;
-    bUseControllerRotationPitch = false;
-    bUseControllerRotationRoll = false;
+    bUseControllerRotationYaw = bUseControllerRotationPitch = bUseControllerRotationRoll = false;
+    auto* MoveComp = GetCharacterMovement();
+    MoveComp->bOrientRotationToMovement = true;
+    MoveComp->RotationRate = FRotator(0, 500, 0);
+    MoveComp->MaxWalkSpeed = 500; MoveComp->MinAnalogWalkSpeed = 20;
+    MoveComp->BrakingDecelerationWalking = 2000; MoveComp->BrakingDecelerationFalling = 1500;
 
-    GetCharacterMovement()->bOrientRotationToMovement = true;
-    GetCharacterMovement()->RotationRate = FRotator(0.f, 500.f, 0.f);
-    GetCharacterMovement()->MaxWalkSpeed = 500.f;
-    GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-    GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-    GetCharacterMovement()->BrakingDecelerationFalling = 1500.f;
-
-    // camera
     CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
     CameraBoom->SetupAttachment(RootComponent);
-    CameraBoom->TargetArmLength = 1200.f;
+    CameraBoom->TargetArmLength = 1200;
     CameraBoom->bUsePawnControlRotation = false;
-    CameraBoom->bInheritPitch = false;
-    CameraBoom->bInheritYaw = false;
-    CameraBoom->bInheritRoll = false;
+    CameraBoom->bInheritPitch = CameraBoom->bInheritYaw = CameraBoom->bInheritRoll = false;
     CameraBoom->SetUsingAbsoluteRotation(true);
-    CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
+    CameraBoom->SetRelativeRotation(FRotator(-60, 0, 0));
 
     FollowCamera = CreateDefaultSubobject<UCameraComponent>(TEXT("FollowCamera"));
     FollowCamera->SetupAttachment(CameraBoom, USpringArmComponent::SocketName);
     FollowCamera->bUsePawnControlRotation = false;
 
-    // ASC
-    ASC = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("ASC"));  // ADD
+    ASC = CreateDefaultSubobject<UAbilitySystemComponent>(TEXT("ASC"));
     ASC->SetIsReplicated(true);
     ASC->SetReplicationMode(EGameplayEffectReplicationMode::Mixed);
+
+    Stats = CreateDefaultSubobject<UCharacterStatsComponent>(TEXT("Stats"));
 }
 
 void AArenaCharacterBase::BeginPlay()
 {
     Super::BeginPlay();
 
-    // input mapping
     if (APlayerController* PC = Cast<APlayerController>(GetController()))
     {
         if (ULocalPlayer* LP = PC->GetLocalPlayer())
         {
-            if (UEnhancedInputLocalPlayerSubsystem* Subsystem =
-                ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP))
+            if (auto* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LP))
             {
-                if (DefaultMappingContext)
-                {
-                    Subsystem->AddMappingContext(DefaultMappingContext, 0);
-                }
+                if (DefaultMappingContext) Subsystem->AddMappingContext(DefaultMappingContext, 0);
             }
         }
     }
 
-    // enforce fixed camera
-    if (CameraBoom)
-    {
-        CameraBoom->bUsePawnControlRotation = false;
-        CameraBoom->bInheritPitch = false;
-        CameraBoom->bInheritYaw = false;
-        CameraBoom->bInheritRoll = false;
-        CameraBoom->SetUsingAbsoluteRotation(true);
-        CameraBoom->SetRelativeRotation(FRotator(-60.f, 0.f, 0.f));
-    }
-    if (FollowCamera) FollowCamera->bUsePawnControlRotation = false;
+    if (Stats) GetCharacterMovement()->MaxWalkSpeed = FMath::Max(150.f, Stats->MoveSpeed);
 
-    // stats speed
-    if (UCharacterStatsComponent* Stats = FindComponentByClass<UCharacterStatsComponent>())
-    {
-        GetCharacterMovement()->MaxWalkSpeed = FMath::Max(150.f, Stats->MoveSpeed);
-    }
-
-    // ASC init
-    if (ASC) ASC->InitAbilityActorInfo(this, this);
-
-    // give and start auto-melee on server
-    if (ASC && HasAuthority() && CombatStyle == ECombatStyle::Melee && MeleeAutoAbilityClass)
-    {
-        FGameplayAbilitySpec Spec(MeleeAutoAbilityClass, 1, 0, this);
-        FGameplayAbilitySpecHandle Handle = ASC->GiveAbility(Spec);
-    }
+    InitASC();                                  // 1) BeginPlay’te dene
+    if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
 }
 
-void AArenaCharacterBase::Tick(float DeltaTime)
+void AArenaCharacterBase::PossessedBy(AController* NewController)
 {
-    Super::Tick(DeltaTime);
+    Super::PossessedBy(NewController);
+    InitASC();                                  // 2) Possession geldiðinde de dene
+    if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
 }
+
+void AArenaCharacterBase::OnRep_PlayerState()
+{
+    Super::OnRep_PlayerState();
+    InitASC();                                  // 3) client için de güvence
+    if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
+}
+
+void AArenaCharacterBase::InitASC()
+{
+    if (bASCInitialized || !ASC) return;
+
+    // Owner'ý Controller varsa onu yap; yoksa karakterin kendisi
+    AActor* OwnerForASC = Cast<AActor>(GetController());
+    if (!OwnerForASC) OwnerForASC = this;
+
+    ASC->InitAbilityActorInfo(OwnerForASC, this);
+    bASCInitialized = true;
+}
+
+void AArenaCharacterBase::Tick(float DeltaSeconds) { Super::Tick(DeltaSeconds); }
 
 void AArenaCharacterBase::SetupPlayerInputComponent(UInputComponent* PlayerInputComponent)
 {
     Super::SetupPlayerInputComponent(PlayerInputComponent);
-
-    if (UEnhancedInputComponent* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
+    if (auto* EIC = Cast<UEnhancedInputComponent>(PlayerInputComponent))
     {
         if (MoveAction)
         {
@@ -123,42 +105,6 @@ void AArenaCharacterBase::Move(const FInputActionValue& Value)
 {
     const FVector2D Input = Value.Get<FVector2D>();
     if (Input.IsNearlyZero()) return;
-
     AddMovementInput(FVector::ForwardVector, Input.Y);
     AddMovementInput(FVector::RightVector, Input.X);
-}
-
-void AArenaCharacterBase::Anim_FireProjectile()
-{
-    if (CombatStyle != ECombatStyle::Ranged) return;
-    if (!ProjectileClass) return;
-
-    FVector  SpawnLoc = GetActorLocation() + GetActorForwardVector() * ProjectileSpawnForwardOffset + FVector(0.f, 0.f, 60.f);
-    FRotator SpawnRot = GetActorRotation();
-
-    if (USkeletalMeshComponent* SkelMesh = GetMesh())
-    {
-        if (MuzzleSocketName != NAME_None && SkelMesh->DoesSocketExist(MuzzleSocketName))
-        {
-            SpawnLoc = SkelMesh->GetSocketLocation(MuzzleSocketName);
-            SpawnRot = SkelMesh->GetSocketRotation(MuzzleSocketName);
-        }
-    }
-
-    FActorSpawnParameters Params;
-    Params.Owner = this;
-    Params.Instigator = this;
-    Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
-
-    GetWorld()->SpawnActor<AActor>(ProjectileClass, SpawnLoc, SpawnRot, Params);
-}
-
-void AArenaCharacterBase::Anim_BeginMeleeWindow()
-{
-    bMeleeWindowActive = true;
-}
-
-void AArenaCharacterBase::Anim_EndMeleeWindow()
-{
-    bMeleeWindowActive = false;
 }
