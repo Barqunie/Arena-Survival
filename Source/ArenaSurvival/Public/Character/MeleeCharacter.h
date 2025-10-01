@@ -1,7 +1,7 @@
 #pragma once
 #include "Character/ArenaCharacterBase.h"
 #include "CoreMinimal.h"
-#include "ArenaMeleeCharacter.generated.h"
+#include "MeleeCharacter.generated.h"
 
 class UGameplayAbility;
 
@@ -49,7 +49,7 @@ protected:
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Melee")
     bool bMeleeWindowActive = false;
 
-    virtual void GiveStartupAbilities() override;
+
 
 private:
     // prevent multiple hits on same target within one swing

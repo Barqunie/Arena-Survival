@@ -12,7 +12,7 @@ class ARENASURVIVAL_API AArenaGameModeBase : public AGameModeBase
 public:
 	AArenaGameModeBase();
 
-	// Optional helper to force respawn later if you need it.
+
 	UFUNCTION(BlueprintCallable, Category = "Spawn")
 	void Respawn(AController* Controller);
 };

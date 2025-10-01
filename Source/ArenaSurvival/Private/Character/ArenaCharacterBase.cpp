@@ -56,21 +56,21 @@ void AArenaCharacterBase::BeginPlay()
 
     if (Stats) GetCharacterMovement()->MaxWalkSpeed = FMath::Max(150.f, Stats->MoveSpeed);
 
-    InitASC();                                  // 1) BeginPlay’te dene
+    InitASC();                                  
     if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
 }
 
 void AArenaCharacterBase::PossessedBy(AController* NewController)
 {
     Super::PossessedBy(NewController);
-    InitASC();                                  // 2) Possession geldiðinde de dene
+    InitASC();                                  
     if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
 }
 
 void AArenaCharacterBase::OnRep_PlayerState()
 {
     Super::OnRep_PlayerState();
-    InitASC();                                  // 3) client için de güvence
+    InitASC();                                  
     if (!bStartupGiven && ASC) { GiveStartupAbilities(); bStartupGiven = true; }
 }
 
@@ -78,7 +78,6 @@ void AArenaCharacterBase::InitASC()
 {
     if (bASCInitialized || !ASC) return;
 
-    // Owner'ý Controller varsa onu yap; yoksa karakterin kendisi
     AActor* OwnerForASC = Cast<AActor>(GetController());
     if (!OwnerForASC) OwnerForASC = this;
 

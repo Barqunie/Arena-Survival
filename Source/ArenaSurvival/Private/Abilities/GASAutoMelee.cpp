@@ -1,88 +1,116 @@
 #include "Abilities/GASAutoMelee.h"
 #include "AbilitySystemComponent.h"
+#include "AbilitySystemGlobals.h"
 #include "Abilities/Tasks/AbilityTask_PlayMontageAndWait.h"
 #include "Abilities/Tasks/AbilityTask_WaitDelay.h"
 #include "Character/ArenaCharacterBase.h"
 #include "Components/Character/CharacterStatsComponent.h"
+#include "GameFramework/Character.h"
+#include "GameFramework/CharacterMovementComponent.h"
 
 UGA_AutoMelee::UGA_AutoMelee()
 {
-	InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
-	NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::LocalPredicted;
+    InstancingPolicy = EGameplayAbilityInstancingPolicy::InstancedPerActor;
+    NetExecutionPolicy = EGameplayAbilityNetExecutionPolicy::ServerInitiated; // veya LocalPredicted
 }
 
 void UGA_AutoMelee::ActivateAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	const FGameplayEventData* TriggerEventData)
+    const FGameplayAbilitySpecHandle Handle,
+    const FGameplayAbilityActorInfo* ActorInfo,
+    const FGameplayAbilityActivationInfo ActivationInfo,
+    const FGameplayEventData* TriggerEventData)
 {
-	if (!CommitAbility(Handle, ActorInfo, ActivationInfo) || !ActorInfo || !MeleeMontage)
-	{
-		EndAbility(Handle, ActorInfo, ActivationInfo, true, true); return;
-	}
+    if (!CommitAbility(Handle, ActorInfo, ActivationInfo))
+    {
+        EndAbility(Handle, ActorInfo, ActivationInfo, /*rep*/true, /*cancelled*/true);
+        return;
+    }
 
-	bRunning = true;
+    if (!ActorInfo || !ActorInfo->AvatarActor.IsValid() || !MeleeMontage)
+    {
+        EndAbility(Handle, ActorInfo, ActivationInfo, true, true);
+        return;
+    }
 
-	if (UAbilityTask_PlayMontageAndWait* Task =
-		UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
-			this, NAME_None, MeleeMontage, PlayRate, NAME_None, false, 1.f, 0.f, false))
-	{
-		Task->OnCompleted.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->OnInterrupted.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->OnCancelled.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->ReadyForActivation();
-	}
+    bEnding = false;
+#if !UE_BUILD_SHIPPING
+    if (GEngine) GEngine->AddOnScreenDebugMessage(-1, 1.5f, FColor::Green, TEXT("GA_AutoMelee: Activate"));
+#endif
+
+    PlayOneCycle();
 }
 
-void UGA_AutoMelee::OnMontageDone()
+void UGA_AutoMelee::PlayOneCycle()
 {
-	if (!bRunning) return;
+    if (!MeleeMontage || !CurrentActorInfo) { return; }
 
-	const FGameplayAbilityActorInfo* Info = GetCurrentActorInfo();
-	float Interval = GetAttackIntervalSeconds(Info) + ExtraDelayAfter;
-	Interval = FMath::Max(0.05f, Interval);
+    PlayTask = UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
+        this, NAME_None, MeleeMontage, PlayRate, NAME_None,
+        /*bStopWhenAbilityEnds*/ true, /*AnimRootMotion*/ 1.0f,
+        /*StartTimeSeconds*/ 0.f, /*bAllowInterruptAfterBlendOut*/ true);
 
-	if (UAbilityTask_WaitDelay* Delay = UAbilityTask_WaitDelay::WaitDelay(this, Interval))
-	{
-		Delay->OnFinish.AddDynamic(this, &UGA_AutoMelee::OnDelayFinished);
-		Delay->ReadyForActivation();
-	}
+    if (!PlayTask) { return; }
+
+    PlayTask->OnCompleted.AddDynamic(this, &UGA_AutoMelee::OnMontageCompleted);
+    PlayTask->OnBlendOut.AddDynamic(this, &UGA_AutoMelee::OnMontageBlendOut);
+    PlayTask->OnInterrupted.AddDynamic(this, &UGA_AutoMelee::OnMontageInterrupted);
+    PlayTask->OnCancelled.AddDynamic(this, &UGA_AutoMelee::OnMontageCancelled);
+    PlayTask->ReadyForActivation();
 }
 
-void UGA_AutoMelee::OnDelayFinished()
-{
-	if (!bRunning || !MeleeMontage) return;
+void UGA_AutoMelee::OnMontageCompleted() { ScheduleNextCycle(); }
+void UGA_AutoMelee::OnMontageBlendOut() { ScheduleNextCycle(); }
 
-	// replay montage
-	if (UAbilityTask_PlayMontageAndWait* Task =
-		UAbilityTask_PlayMontageAndWait::CreatePlayMontageAndWaitProxy(
-			this, NAME_None, MeleeMontage, PlayRate, NAME_None, false, 1.f, 0.f, false))
-	{
-		Task->OnCompleted.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->OnInterrupted.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->OnCancelled.AddDynamic(this, &UGA_AutoMelee::OnMontageDone);
-		Task->ReadyForActivation();
-	}
+void UGA_AutoMelee::OnMontageInterrupted()
+{
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
 }
 
-float UGA_AutoMelee::GetAttackIntervalSeconds(const FGameplayAbilityActorInfo* Info) const
+void UGA_AutoMelee::OnMontageCancelled()
 {
-	float Interval = 0.35f;
-	if (const AArenaCharacterBase* C = Info ? Cast<AArenaCharacterBase>(Info->AvatarActor.Get()) : nullptr)
-	{
-		if (const UCharacterStatsComponent* S = C->FindComponentByClass<UCharacterStatsComponent>())
-			Interval = FMath::Max(0.05f, S->AttackSpeed);
-	}
-	return Interval;
+    EndAbility(CurrentSpecHandle, CurrentActorInfo, CurrentActivationInfo, true, true);
+}
+
+void UGA_AutoMelee::ScheduleNextCycle()
+{
+    if (bEnding) return;
+
+    const float Interval = GetAttackIntervalFromStats() + ExtraDelayAfter;
+
+    WaitTask = UAbilityTask_WaitDelay::WaitDelay(this, FMath::Max(0.01f, Interval));
+    WaitTask->OnFinish.AddDynamic(this, &UGA_AutoMelee::PlayOneCycle);
+    WaitTask->ReadyForActivation();
+}
+
+float UGA_AutoMelee::GetAttackIntervalFromStats() const
+{
+    if (!CurrentActorInfo) return 0.35f;
+
+    if (const AActor* Avatar = CurrentActorInfo->AvatarActor.Get())
+    {
+        if (const AArenaCharacterBase* C = Cast<AArenaCharacterBase>(Avatar))
+        {
+            if (const UCharacterStatsComponent* S = C->FindComponentByClass<UCharacterStatsComponent>())
+            {
+                return FMath::Max(0.05f, S->AttackSpeed);
+            }
+        }
+    }
+    return 0.35f;
 }
 
 void UGA_AutoMelee::EndAbility(
-	const FGameplayAbilitySpecHandle Handle,
-	const FGameplayAbilityActorInfo* ActorInfo,
-	const FGameplayAbilityActivationInfo ActivationInfo,
-	bool bReplicateEndAbility, bool bWasCancelled)
+    const FGameplayAbilitySpecHandle Handle,
+    const FGameplayAbilityActorInfo* ActorInfo,
+    const FGameplayAbilityActivationInfo ActivationInfo,
+    bool bReplicateEndAbility,
+    bool bWasCancelled)
 {
-	bRunning = false;
-	Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
+    bEnding = true;
+u
+    // task referanslarýný býrak
+    PlayTask = nullptr;
+    WaitTask = nullptr;
+
+    Super::EndAbility(Handle, ActorInfo, ActivationInfo, bReplicateEndAbility, bWasCancelled);
 }

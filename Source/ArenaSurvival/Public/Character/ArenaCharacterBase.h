@@ -23,8 +23,8 @@ public:
     virtual void BeginPlay() override;
     virtual void Tick(float DeltaSeconds) override;
     virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
-    virtual void PossessedBy(AController* NewController) override;       // NEW
-    virtual void OnRep_PlayerState() override;                           // NEW
+    virtual void PossessedBy(AController* NewController) override;       
+    virtual void OnRep_PlayerState() override;                          
 
 protected:
     void Move(const FInputActionValue& Value);
@@ -32,8 +32,7 @@ protected:
     // türevlerin baþlangýçta vereceði ability’ler
     virtual void GiveStartupAbilities() {}
 
-    // ASC’yi güvenli init eder (BeginPlay/PossessedBy/OnRep_PlayerState)
-    void InitASC();                                                      // NEW
+    void InitASC();                                                      
 
     // Components
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Camera", meta = (AllowPrivateAccess = "true"))
@@ -55,6 +54,6 @@ protected:
     UCharacterStatsComponent* Stats;
 
 private:
-    bool bASCInitialized = false;                // tekrar init’i engeller
-    bool bStartupGiven = false;                 // ability’ler bir kez verilsin
+    bool bASCInitialized = false;               
+    bool bStartupGiven = false;                 
 };
