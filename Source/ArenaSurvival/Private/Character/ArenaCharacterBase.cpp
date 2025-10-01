@@ -97,7 +97,6 @@ void AArenaCharacterBase::BeginPlay()
     {
         FGameplayAbilitySpec Spec(MeleeAutoAbilityClass, 1, 0, this);
         FGameplayAbilitySpecHandle Handle = ASC->GiveAbility(Spec);
-        ASC->TryActivateAbility(Handle);
     }
 }
 
